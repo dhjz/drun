@@ -19,6 +19,12 @@ build_target() {
     local custom_name=$4
     local extra_ld=$5
 
+    # if [ "$os" == "windows" ]; then
+    #     current_ldflags="-s -w" 
+    # else
+    #     current_ldflags="-s -w -extldflags '-static'"
+    # fi
+
     # 拼接平台标识 (如 linux_amd64, linux_armv7)
     local platform="${os}_${arch}"
     if [ -n "$arm" ]; then platform="${platform}v${arm}"; fi
