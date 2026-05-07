@@ -79,7 +79,7 @@ build_target "linux" "amd64" "" "" ""
 
 # 其他 Linux 架构 (按需取消注释)
 # build_target "linux" "arm" "7" "" ""
-# build_target "linux" "arm64" "" "" ""
+build_target "linux" "arm64" "" "" ""
 
 
 # ================= Windows 系列 =================
