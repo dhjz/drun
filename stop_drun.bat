@@ -1,0 +1,3 @@
+echo stop drun...
+taskkill /f /t /im drun.exe
+taskkill /f /t /im drun_debug.exe

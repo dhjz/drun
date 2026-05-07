@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>项目管理器</title>
+  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="static/index.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <div class="header">
+      <h1>📁 项目管理器</h1>
+      <div class="flex-center gap10">
+        <select v-model="filterType" style="width: 70px;">
+          <option value="">全部</option>
+          <option value="frontend">前端</option>
+          <option value="backend">后端</option>
+          <option value="command">命令</option>
+          <option value="other">其他</option>
+        </select>
+        <input v-model="searchKeyword" type="text" placeholder="搜索项目名称或路径..." class="search-input">
+      </div>
+      <div class="header-actions">
+        <button @click="toggleViewMode">{{ simpleMode ? '完整版' : '简洁版' }}</button>
+        <button class="primary" @click="openAddModal">+ 添加项目</button>
+        <button class="primary" @click="openAddCommandModal">+ 添加命令</button>
+        <button @click="openAddTagModal">+ 标签</button>
+        <button @click="importProjects">导入</button>
+        <button @click="exportProjects">导出</button>
+      </div>
+    </div>
+
+    <div class="container">
+      <div v-if="tags.length > 0" class="tags-bar">
+        <span class="tag-item" :class="{'active': filterTag === ''}" @click="filterTag = ''">全部</span>
+        <span v-for="tag in tags" :key="tag.id" class="tag-item" :class="{'active': filterTag === tag.id}" :style="filterTag === tag.id ? {background: tag.color, borderColor: tag.color} : {borderColor: tag.color, color: tag.color}" @click="filterTag = tag.id">
+          {{ tag.name }}
+          <span class="tag-close" @click.stop="deleteTag(tag.id)">×</span>
+        </span>
+      </div>
+
+      <div v-if="!hasProjects" class="empty-state">
+        <div class="icon">📁</div>
+        <p>暂无项目，请点击"添加项目"按钮添加</p>
+        <button class="primary" @click="openAddModal">+ 添加项目</button>
+      </div>
+
+      <div v-else class="project-grid" :class="{'simple-grid': simpleMode}">
+        <div v-for="project in filteredProjects" :key="project.id" class="project-card" :class="{'simple-card': simpleMode}">
+          <div v-if="!simpleMode" class="project-card-header">
+            <div class="flex flex-center gap10">
+              <h3>{{ project.name }}</h3>
+              <span class="tag" :class="getTypeClass(project.type)">{{ getTypeLabel(project.type) }}</span>
+            </div>
+            <div class="project-card-header-actions">
+              <button class="btn-xs" @click="openProjectDir(project)" title="打开目录">📁</button>
+              <button class="btn-xs" @click="openEditModal(project)" title="编辑">✏️</button>
+              <button class="btn-xs" @click="deleteProject(project)" title="删除">❌</button>
+            </div>
+          </div>
+          <div v-if="!simpleMode" class="project-card-body">
+            <div class="info-row">
+              <span class="label">路径:</span>
+              <span class="value path"  @click="copyPath(project.path)">{{ project.path }}</span>
+            </div>
+          </div>
+          <div v-if="!simpleMode" class="project-card-actions">
+            <template v-for="(action, idx) in getProjectActions(project)" :key="idx">
+              <button v-if="idx < 4 && action.type === 'command'" class="btn-sm btn-start"
+                      :title="action.data.cmd"
+                      @click="startCommand(project, action.data)">
+                {{ action.data.name }}
+              </button>
+              <button v-if="idx < 4 && action.type === 'run'" class="btn-sm btn-start" @click="runBackendProject(project)">运行</button>
+              <button v-if="idx < 4 && action.type === 'log'" class="btn-sm" @click="showLog(project)">日志</button>
+            </template>
+            <div v-if="getProjectActions(project).length > 4" class="dropdown" style="display: inline-block;">
+              <button class="btn-sm">更多</button>
+              <div class="dropdown-menu" style="left: 0; right: auto; min-width: 120px; padding: 5px;">
+                <template v-for="(action, idx) in getProjectActions(project)" :key="idx">
+                  <div v-if="idx >= 4 && action.type === 'command'" class="dropdown-item">
+                    <button class="btn-sm btn-start"
+                            :title="action.data.cmd"
+                            @click="startCommand(project, action.data)">
+                      {{ action.data.name }}
+                    </button>
+                  </div>
+                  <div v-if="idx >= 4 && action.type === 'run'" class="dropdown-item">
+                    <button class="btn-sm btn-start" @click="runBackendProject(project)">运行</button>
+                  </div>
+                  <div v-if="idx >= 4 && action.type === 'log'" class="dropdown-item">
+                    <button class="btn-sm" @click="showLog(project)">日志</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+          <div v-if="simpleMode" class="simple-card-content" :class="'border-' + project.type" :title="project.path">
+            <div class="simple-card-name" @click="copyPath(project.path)" style="cursor: pointer;">{{ project.name }}</div>
+            <div class="simple-card-actions">
+              <button class="btn-xs" @click="openProjectDir(project)" title="打开目录">打开</button>
+              <button class="btn-xs" @click="openEditModal(project)" title="编辑">编辑</button>
+              <button class="btn-xs danger" @click="deleteProject(project)" title="删除">删除</button>
+              <template v-if="project.commands && project.commands.length === 1">
+                <button class="btn-xs btn-start" :title="project.commands[0].cmd" @click="startCommand(project, project.commands[0])">{{ project.commands[0].name }}</button>
+              </template>
+              <div v-else-if="project.commands && project.commands.length > 1" class="dropdown">
+                <button class="btn-xs primary">操作</button>
+                <div class="dropdown-menu">
+                  <div v-for="(cmd, idx) in project.commands" :key="idx" class="dropdown-item">
+                    <button class="btn-sm btn-start" :title="cmd.cmd" @click="startCommand(project, cmd)">{{ cmd.name }}</button>
+                  </div>
+                  <template v-if="project.type === 'backend' && project.subModules && project.subModules.length > 0">
+                    <div class="dropdown-item">
+                      <button class="btn-sm btn-start" @click="runBackendProject(project)">运行</button>
+                    </div>
+                  </template>
+                  <div v-if="project.logFile" class="dropdown-item">
+                    <button class="btn-sm" @click="showLog(project)">日志</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showModal" class="modal-mask">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ editingProject ? '编辑项目' : '添加项目' }}</h3>
+          <button class="close" @click="closeModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>项目路径 <span class="required">*</span></label>
+            <div class="form-row">
+              <input v-model="form.path" type="text" placeholder="选择项目文件夹" @change="onPathChange">
+              <button @click="browsePath">浏览</button>
+            </div>
+          </div>
+
+          <div v-if="analyzing" style="text-align: center; padding: 20px;">
+            <div class="loading"></div>
+            <p style="margin-top: 10px; color: #909399;">正在分析项目...</p>
+          </div>
+
+          <template v-if="!analyzing && form.path">
+            <div class="form-group">
+              <label>项目名称 <span class="required">*</span></label>
+              <input v-model="form.name" type="text" placeholder="项目名称">
+            </div>
+            <div class="form-group">
+              <label>项目类型</label>
+              <select v-model="form.type">
+                <option value="backend">后端</option>
+                <option value="frontend">前端</option>
+                <option value="other">其他</option>
+              </select>
+            </div>
+            <div class="form-group" v-if="form.type === 'backend'">
+              <label>Java目录 <span class="text-sm" style="color: #909399;">(留空使用系统Java)</span></label>
+              <div class="form-row">
+                <input v-model="form.sdkPath" type="text" placeholder="例如: D:\java\jdk-17">
+                <button @click="browseSdkPath('backend')">浏览</button>
+              </div>
+            </div>
+            <div class="form-group" v-if="form.type === 'frontend'">
+              <label>Node目录 <span class="text-sm" style="color: #909399;">(留空使用系统Node)</span></label>
+              <div class="form-row">
+                <input v-model="form.sdkPath" type="text" placeholder="例如: D:\nodejs">
+                <button @click="browseSdkPath('frontend')">浏览</button>
+              </div>
+            </div>
+            <div class="form-group" v-if="form.type === 'frontend'">
+              <label>打包名称 <span class="text-sm" style="color: #909399;">(用于打包文件名，如: myapp-prod)</span></label>
+              <input v-model="form.packageName" type="text" placeholder="例如: myapp-prod">
+            </div>
+            <div class="form-group">
+              <label>前置命令 <span class="text-sm" style="color: #909399;">(执行所有命令前先运行此命令)</span></label>
+              <input v-model="form.preCommand" type="text" placeholder="例如: git pull">
+            </div>
+            <div class="form-group" v-if="tags.length > 0">
+              <label>标签</label>
+              <div class="tag-selector">
+                <span v-for="tag in tags" :key="tag.id" class="tag-option" :class="{'selected': form.tagIds && form.tagIds.includes(tag.id)}" :style="form.tagIds && form.tagIds.includes(tag.id) ? {background: tag.color, borderColor: tag.color} : {borderColor: tag.color, color: tag.color}" @click="toggleTag(tag.id)">
+                  {{ tag.name }}
+                </span>
+              </div>
+            </div>
+            <!-- <div class="form-group">
+              <label>日志文件路径</label>
+              <input v-model="form.logFile" type="text" placeholder="例如: D:\project\myapp\app.log">
+            </div> -->
+
+            <div v-if="form.commands.length > 0" class="form-group">
+              <label>启动命令</label>
+              <div class="command-list">
+                <div v-for="(cmd, idx) in form.commands" :key="idx" class="command-item">
+                  <span class="name">{{ cmd.name }}</span>
+                  <span class="cmd">{{ cmd.cmd }}</span>
+                  <div class="actions">
+                    <button class="btn-xs" @click="editCommand(idx)">编辑</button>
+                    <button class="btn-xs" @click="removeCommand(idx)">删除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="form.subModules && form.subModules.length > 0" class="form-group">
+              <label>子模块 (Maven多模块项目) <span class="text-sm" style="color: #909399;">(jar路径可手动配置，留空则自动查找)</span></label>
+              <div class="command-list">
+                <div v-for="(mod, idx) in form.subModules" :key="idx" class="submodule-edit-item">
+                  <div class="submodule-edit-row">
+                    <span class="submodule-edit-name">{{ mod.name }}</span>
+                    <button class="btn-xs btn-danger" @click="removeSubModule(idx)">删除</button>
+                  </div>
+                  <input v-model="mod.jarPath" type="text" placeholder="留空则运行时自动查找target下的jar文件" class="submodule-jar-input">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" v-if="form.type === 'backend'">
+              <label>添加子模块</label>
+              <div style="background: #f5f7fa; padding: 15px; border-radius: 4px;">
+                <div class="form-row mb10">
+                  <input v-model="newSubModule.name" type="text" placeholder="子模块名称" style="flex: 1;">
+                </div>
+                <div class="form-row mb10">
+                  <input v-model="newSubModule.path" type="text" placeholder="子模块路径(绝对路径)" style="flex: 2;">
+                </div>
+                <div class="form-row mb10">
+                  <input v-model="newSubModule.jarPath" type="text" placeholder="jar路径(可选，留空自动查找)" style="flex: 2;">
+                </div>
+                <div class="form-row">
+                  <button class="primary" @click="addSubModule">添加子模块</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>添加自定义命令 <span class="text-sm" style="color: #909399;">(命令名含"打包"二字会自动打包到dist-zip)</span></label>
+              <div style="background: #f5f7fa; padding: 15px; border-radius: 4px;">
+                <div class="form-row mb10">
+                  <input v-model="newCommand.name" type="text" placeholder="命令名称(例如: 启动)" style="flex: 1;">
+                </div>
+                <div class="form-row mb10">
+                  <input v-model="newCommand.cmd" type="text" placeholder="命令(例如: npm run dev 或 mvn spring-boot:run)" style="flex: 2;">
+                </div>
+                <div class="form-row mb10">
+                  <input v-model="newCommand.workDir" type="text" placeholder="工作目录(可选，不填则使用项目路径)" style="flex: 1;">
+                </div>
+                <div class="form-row">
+                  <label style="display: flex; align-items: center; gap: 5px; width: auto;">
+                    <input v-model="newCommand.wait" type="checkbox" style="width: auto;">
+                    <span>等待命令完成</span>
+                  </label>
+                  <button class="primary" @click="addCommand" style="margin-left: auto;">添加</button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="form.commands.length === 0" class="form-group">
+              <label style="color: #e6a23c;">未能识别启动命令</label>
+              <p style="font-size: 12px; color: #909399; margin-top: 5px;">请手动添加启动命令或确保项目根目录包含正确的配置文件</p>
+            </div>
+          </template>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeModal">取消</button>
+          <button class="primary" @click="saveProject" :disabled="!form.name || !form.path">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showLogPanel" class="log-panel">
+      <div class="log-panel-header">
+        <h4>日志 - {{ logFile }}</h4>
+        <button class="close" @click="closeLogPanel">&times;</button>
+      </div>
+      <div class="log-panel-body">
+        <div v-html="logContent"></div>
+      </div>
+    </div>
+
+    <div v-if="showSubModulePanel" class="modal-mask" @click.self="closeSubModulePanel">
+      <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3>选择要运行的子模块</h3>
+          <button class="close" @click="closeSubModulePanel">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="submodule-list">
+            <div v-for="(mod, idx) in selectedProject.subModules" :key="idx" 
+                 class="submodule-item" 
+                 :class="{'submodule-disabled': !mod.jarPath}"
+                 @click="runSubModule(selectedProject, mod)">
+              <div class="submodule-name">{{ mod.name }}</div>
+              <div class="submodule-path" :style="{color: mod.jarPath ? '' : '#E6A23C'}">{{ mod.jarPath || '未配置jar文件，默认target目录jar包' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAddTagModal" class="modal-mask" @click.self="closeAddTagModal">
+      <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+          <h3>添加标签</h3>
+          <button class="close" @click="closeAddTagModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>标签名称 <span class="required">*</span></label>
+            <input v-model="newTag.name" type="text" placeholder="例如: 重要、进行中">
+          </div>
+          <div class="form-group">
+            <label>标签颜色</label>
+            <div class="color-picker">
+              <span v-for="color in presetColors" :key="color" class="color-option" :style="{background: color}" :class="{'selected': newTag.color === color}" @click="newTag.color = color"></span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeAddTagModal">取消</button>
+          <button class="primary" @click="addTag" :disabled="!newTag.name">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAddCommandModal" class="modal-mask">
+      <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3>{{ editingCommandProject ? '编辑命令' : '添加命令' }}</h3>
+          <button class="close" @click="closeAddCommandModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>命令名称 <span class="required">*</span></label>
+            <input v-model="commandForm.name" type="text" placeholder="例如: 启动服务">
+          </div>
+          <div class="form-group">
+            <label>工作路径</label>
+            <div class="form-row">
+              <input v-model="commandForm.path" type="text" placeholder="命令执行的工作目录(可选)">
+              <button @click="browseCommandPath">浏览</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>命令 <span class="required">*</span></label>
+            <input v-model="commandForm.cmd" type="text" placeholder="例如: npm run dev 或 python main.py">
+          </div>
+          <div class="form-group" v-if="tags.length > 0">
+            <label>标签</label>
+            <div class="tag-selector">
+              <span v-for="tag in tags" :key="tag.id" class="tag-option" :class="{'selected': commandForm.tagIds && commandForm.tagIds.includes(tag.id)}" :style="commandForm.tagIds && commandForm.tagIds.includes(tag.id) ? {background: tag.color, borderColor: tag.color} : {borderColor: tag.color, color: tag.color}" @click="toggleCommandTag(tag.id)">
+                {{ tag.name }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeAddCommandModal">取消</button>
+          <button class="primary" @click="saveCommandProject" :disabled="!commandForm.name || !commandForm.cmd">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="static/vue.global.prod.min.js"></script>
+  <script src="static/utils.js"></script>
+  <script src="static/index.js"></script>
+</body>
+</html>
